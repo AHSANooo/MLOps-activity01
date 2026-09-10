@@ -31,16 +31,19 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.prep.outputs.version }}
+      image_name: ${{ steps.prep.outputs.image_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get version
-        id: version
+      - name: Prepare build variables
+        id: prep
         run: |
           VERSION=${GITHUB_REF_NAME#v}
+          IMAGE_NAME="ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Login GHCR
         uses: docker/login-action@v3
@@ -52,13 +55,13 @@ jobs:
       - name: Build
         run: |
           docker build \
-            -t ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }} \
-            -t ghcr.io/${{ github.repository }}:latest .
+            -t ${{ steps.prep.outputs.image_name }}:${{ steps.prep.outputs.version }} \
+            -t ${{ steps.prep.outputs.image_name }}:latest .
 
       - name: Push
         run: |
-          docker push ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
-          docker push ghcr.io/${{ github.repository }}:latest
+          docker push ${{ steps.prep.outputs.image_name }}:${{ steps.prep.outputs.version }}
+          docker push ${{ steps.prep.outputs.image_name }}:latest
 
   deploy-staging:
     needs: build
@@ -73,14 +76,14 @@ jobs:
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
-            docker pull ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+            docker pull ${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.version }}
             docker stop mlops-api || true
             docker rm mlops-api || true
             docker run -d \
               --name mlops-api \
               --restart unless-stopped \
               -p 5000:5000 \
-              ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+              ${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.version }}
 
       - name: Smoke test
         run: |
@@ -102,11 +105,11 @@ jobs:
           username: ${{ secrets.PRODUCTION_USER }}
           key: ${{ secrets.PRODUCTION_SSH_KEY }}
           script: |
-            docker pull ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+            docker pull ${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.version }}
             docker stop mlops-api || true
             docker rm mlops-api || true
             docker run -d \
               --name mlops-api \
               --restart unless-stopped \
               -p 5000:5000 \
-              ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+              ${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.version }}
